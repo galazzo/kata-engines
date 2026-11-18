@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "engine": "sd.cpp",
+  "capabilities": {
+    "high_noise_lora_runtime": true
+  }
+}

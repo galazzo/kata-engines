@@ -1,0 +1,59 @@
+Subject: [PATCH] fix(lora): apply `|high_noise|` LoRAs when applied at runtime
+
+A LoRA loaded for the high noise expert (`<lora:|high_noise|NAME:W>`) has its
+tensors renamed to `lora.model.high_noise_diffusion_model.*`. When the weights
+are quantized (GGUF Q4/Q5/Q8...) LoRAs are applied at runtime, and
+apply_loras_at_runtime() only kept tensors named `model.diffusion_model.*`, so
+the high noise LoRA was left empty and silently dropped: the video was
+bit-identical with and without it.
+
+Keep the high noise tensors too. The adapter is shared by both experts, which
+is safe because every runner looks its weights up by its own prefix.
+
+diff --git a/src/name_conversion.cpp b/src/name_conversion.cpp
+index bd23231..9fa6cd6 100644
+--- a/src/name_conversion.cpp
++++ b/src/name_conversion.cpp
+@@ -1544,6 +1544,13 @@ bool is_diffusion_model_name(const std::string& name) {
+     return false;
+ }
+ 
++// Tensors of a LoRA loaded with the `|high_noise|` prefix are named
++// `lora.model.high_noise_diffusion_model.*` (see ModelManager::prepare_lora_sources).
++bool is_high_noise_diffusion_model_name(const std::string& name) {
++    static const std::string prefix = "model.high_noise_diffusion_model.";
++    return starts_with(name, prefix) || starts_with(name, "lora." + prefix);
++}
++
+ bool is_first_stage_model_name(const std::string& name) {
+     for (const auto& prefix : first_stage_model_prefix_vec) {
+         if (starts_with(name, prefix) || starts_with(name, "lora." + prefix)) {
+diff --git a/src/name_conversion.h b/src/name_conversion.h
+index 8d90c7e..8a7700a 100644
+--- a/src/name_conversion.h
++++ b/src/name_conversion.h
+@@ -7,6 +7,7 @@
+ 
+ bool is_cond_stage_model_name(const std::string& name);
+ bool is_diffusion_model_name(const std::string& name);
++bool is_high_noise_diffusion_model_name(const std::string& name);
+ bool is_first_stage_model_name(const std::string& name);
+ 
+ std::string convert_tensor_name(std::string name, SDVersion version);
+diff --git a/src/pipeline/diffusion_engine.cpp b/src/pipeline/diffusion_engine.cpp
+index c2ae6b8..d6e3cd5 100644
+--- a/src/pipeline/diffusion_engine.cpp
++++ b/src/pipeline/diffusion_engine.cpp
+@@ -1769,7 +1769,11 @@ bool StableDiffusionGGML::apply_loras_at_runtime(const std::vector<ModelManager:
+     }
+     if (diffusion_model) {
+         auto lora_tensor_filter = [&](const std::string& tensor_name) {
+-            if (is_diffusion_model_name(tensor_name)) {
++            // The tensors of a `|high_noise|` LoRA live under the high noise prefix: keep them too, or
++            // the LoRA ends up empty and is silently dropped. The adapter is shared by both experts, which
++            // is safe because every runner looks its weights up by its own prefix
++            // (`model.diffusion_model.` / `model.high_noise_diffusion_model.`).
++            if (is_diffusion_model_name(tensor_name) || is_high_noise_diffusion_model_name(tensor_name)) {
+                 return true;
+             }
+             return false;
