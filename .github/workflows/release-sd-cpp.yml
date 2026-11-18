@@ -34,7 +34,7 @@ jobs:
         shell: pwsh
         run: |
           $dst = "cudart"
-          robocopy "${{ env.CUDA_PATH }}in" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll
+          robocopy "${{ env.CUDA_PATH }}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll
           Compress-Archive -Path "$dst\*" -DestinationPath dist/cudart-sd-bin-win-cu12-x64.zip
       - name: Publish
         shell: pwsh

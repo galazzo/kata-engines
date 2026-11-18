@@ -1,0 +1,33 @@
+name: check-upstream
+
+# Weekly: does every patch still apply to the newest upstream release of its engine?
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+jobs:
+  sd-cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check the patches against the newest upstream release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(grep '^tag=' sd.cpp/UPSTREAM | cut -d= -f2)
+          latest=$(gh api repos/leejet/stable-diffusion.cpp/releases/latest --jq .tag_name)
+          echo "sd.cpp pinned: $pinned, newest upstream release: $latest" >> "$GITHUB_STEP_SUMMARY"
+          git clone --quiet --depth 1 --branch "$latest" https://github.com/leejet/stable-diffusion.cpp.git /tmp/sd
+          fail=0
+          for patch in sd.cpp/patches/*.patch; do
+            if git -C /tmp/sd apply --check "$GITHUB_WORKSPACE/$patch" 2>/dev/null; then
+              echo "- applies: $patch" >> "$GITHUB_STEP_SUMMARY"
+            elif git -C /tmp/sd apply --reverse --check "$GITHUB_WORKSPACE/$patch" 2>/dev/null; then
+              echo "- already in upstream, delete it: $patch" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "- DOES NOT APPLY: $patch" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            fi
+          done
+          exit $fail

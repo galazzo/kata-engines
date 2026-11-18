@@ -14,6 +14,8 @@ scripts/build.ps1     clone the tag, apply the patches, build, zip
 .github/workflows/    publishes a release `<upstream tag>-kata<N>`
 ```
 
+How to publish a release, move to a new upstream tag and add a patch: see [MAINTAINING.md](MAINTAINING.md).
+
 ## Patches
 
 | Engine | Patch | What it fixes | Upstream |
