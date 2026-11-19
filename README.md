@@ -27,6 +27,10 @@ How to publish a release, move to a new upstream tag and add a patch: see [MAINT
 From a Visual Studio developer shell (cl.exe, Ninja, CUDA toolkit on PATH). CUDA 12.x does not accept
 Visual Studio 2026 as host compiler: use the 2019 or 2022 tools.
 
+The released CUDA build uses CUDA 12.8 (architectures 61 to 120, Blackwell included), and the cudart zip carries
+the 12.8 DLLs: it needs an NVIDIA driver 570 or newer. With an older toolkit `build.ps1` drops the architectures
+the toolkit does not know (12.6 stops at 90), so only build the release with 12.8.
+
 ```powershell
 ./scripts/build.ps1 -Engine sd.cpp -Variant cuda12 -CudaArchitectures 86   # fast, your GPU only
 ```
