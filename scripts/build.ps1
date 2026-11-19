@@ -12,7 +12,13 @@ Run it from a Visual Studio developer shell (cl.exe, Ninja and the CUDA toolkit 
 param(
     [Parameter(Mandatory)][ValidateSet('sd.cpp')][string]$Engine,
     [Parameter(Mandatory)][ValidateSet('cpu', 'cuda12', 'vulkan')][string]$Variant,
-    [string]$CudaArchitectures = '61;70;75;80;86;89;90;100;120',
+    # Default: every architecture the installed nvcc knows (Blackwell 100/120 need CUDA 12.8 or newer).
+    [string]$CudaArchitectures = $(
+        $ver = if ((Get-Command nvcc -ErrorAction SilentlyContinue) -and ((nvcc --version | Out-String) -match 'release (\d+)\.(\d+)')) {
+            [version]"$($Matches[1]).$($Matches[2])"
+        } else { [version]'0.0' }
+        if ($ver -ge [version]'12.8') { '61;70;75;80;86;89;90;100;120' } else { '61;70;75;80;86;89;90' }
+    ),
     [int]$Revision = 1,
     [string]$WorkDir = (Join-Path $PSScriptRoot '..\_work'),
     [string]$DistDir = (Join-Path $PSScriptRoot '..\dist')
@@ -26,8 +32,13 @@ Get-Content (Join-Path $root "$Engine\UPSTREAM") | ForEach-Object {
 }
 $src = Join-Path $WorkDir "$Engine-$($upstream.tag)"
 if (-not (Test-Path $src)) {
-    git clone --depth 1 --branch $upstream.tag --recurse-submodules --shallow-submodules $upstream.repo $src
-    if ($LASTEXITCODE) { throw 'clone failed' }
+    # core.longpaths: some submodules (cutlass) have paths over the 260 characters of Windows.
+    git -c core.longpaths=true clone --depth 1 --branch $upstream.tag --recurse-submodules --shallow-submodules $upstream.repo $src
+    if ($LASTEXITCODE) {
+        Remove-Item -Recurse -Force $src -ErrorAction SilentlyContinue
+        throw 'clone failed'
+    }
+    git -C $src config core.longpaths true
 }
 git -C $src reset --hard --quiet
 git -C $src clean -fdx --quiet -e build
