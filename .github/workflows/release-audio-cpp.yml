@@ -20,7 +20,7 @@ jobs:
         with:
           cuda: "12.8.1"
           method: "network"
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "cufft", "cufft_dev", "thrust", "visual_studio_integration"]'
       - name: Build patched audio.cpp and Sonic
         shell: pwsh
         run: |
@@ -33,7 +33,7 @@ jobs:
         run: |
           $tag = ((Get-Content audio.cpp/UPSTREAM) -match '^tag=')[0].Substring(4)
           $dst = "cudart"
-          robocopy "${{ env.CUDA_PATH }}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll
+          robocopy "${{ env.CUDA_PATH }}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll cufft64_*.dll
           Compress-Archive -Path "$dst\*" -DestinationPath "dist/audio-$tag-cudart-windows-x64-cuda12.8.zip"
       - name: Publish
         shell: pwsh
