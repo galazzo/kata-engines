@@ -7,6 +7,24 @@ never an error, but it silently drops the patches.
 
 ## Publish a release
 
+Preferred for a verified local build:
+
+```powershell
+./scripts/build.ps1 -Engine audio.cpp -Variant cuda12 `
+  -CudaArchitectures 86 -Revision 1 `
+  -WorkDir C:\keng-work -DistDir C:\keng-dist
+gh release create v0.9.5-kata1 C:\keng-dist\audio-v0.9.5-*.zip `
+  -R galazzo/kata-engines --target main
+```
+
+Use short Windows paths for audio.cpp because SentencePiece fails while writing
+objects when the source/build path is too long. Before publishing, run the
+produced `audiocpp_server.exe --version` and one actual generation request that
+uses the patched capability.
+
+The workflows below are the reproducibility fallback. Do not rely on a green
+workflow as a substitute for the local runtime test.
+
 ```powershell
 gh workflow run release-sd-cpp.yml -R galazzo/kata-engines -f revision=1
 gh workflow run release-audio-cpp.yml -R galazzo/kata-engines -f revision=1
