@@ -1,18 +1,29 @@
 audio.cpp: add OpenAI offline speech speed fallback
 
-Use the existing Sonic streaming tempo processor after synthesis when the model contract has no native speed option. Keep 1.0 as a no-op and reject unsupported streaming fallback explicitly.
+Use the existing Sonic streaming tempo processor after synthesis when the model contract has no native speed option. VoxCPM is detected explicitly because its v0.9.5 contract flags are resolved before GGUF capabilities load.
 
 diff --git a/app/server/parallel_runtime.cpp b/app/server/parallel_runtime.cpp
-index 1b2fd9a..ce7b625 100644
+index 1b2fd9a..7a5de18 100644
 --- a/app/server/parallel_runtime.cpp
 +++ b/app/server/parallel_runtime.cpp
-@@ -1010,12 +1010,24 @@ HttpResponse ParallelServerState::handle_speech(const std::string & body_text) {
+@@ -874,7 +874,8 @@ engine::runtime::TaskRequest ParallelServerState::build_speech_request(const Loa
+     return minitts::server::build_speech_request(
+         body,
+         SpeechRequestContext{
+-            request_base_, config_.voice_dir, model.voice_presets, model.default_voice_preset,
++            model.config.family, request_base_, config_.voice_dir,
++            model.voice_presets, model.default_voice_preset,
+             model.accepts_reference_text, model.accepts_speed,
+             model.accepts_speaking_rate,
+             model.config.default_request_options});
+@@ -1010,12 +1011,28 @@ HttpResponse ParallelServerState::handle_speech(const std::string & body_text) {
      auto request_lease = bind_request(model, busy_timeout_ms);
      const auto request = build_speech_request(model, body);
      if (body.find("stream_format") != nullptr || bool_field(body, "stream", false)) {
 +        const float speed = speech_speed(body);
-+        if (speed != 1.0F && !model.accepts_speed &&
-+            !model.accepts_speaking_rate) {
++        if (speed != 1.0F &&
++            speech_speed_postprocess(model.config.family, model.accepts_speed,
++                                     model.accepts_speaking_rate)) {
 +            throw engine::runtime::InvalidRequestError(
 +                "speed postprocessing is not available for streaming speech");
 +        }
@@ -25,7 +36,10 @@ index 1b2fd9a..ce7b625 100644
 +    const auto model_audio = select_audio_output(timed_result.result);
 +    const float speed = speech_speed(body);
 +    const auto processed_audio =
-+        speed != 1.0F && !model.accepts_speed && !model.accepts_speaking_rate
++        speed != 1.0F &&
++                speech_speed_postprocess(model.config.family,
++                                         model.accepts_speed,
++                                         model.accepts_speaking_rate)
 +            ? apply_speech_speed(model_audio, speed)
 +            : model_audio;
 +    const auto & audio = processed_audio;
@@ -33,16 +47,27 @@ index 1b2fd9a..ce7b625 100644
      const auto response_format = engine::io::json::optional_string(body, "response_format", "wav");
      if (response_format == "json" || response_format == "b64_json") {
 diff --git a/app/server/runtime.cpp b/app/server/runtime.cpp
-index e170573..3330e2a 100644
+index e170573..e142edf 100644
 --- a/app/server/runtime.cpp
 +++ b/app/server/runtime.cpp
-@@ -921,13 +921,25 @@ HttpResponse ServerState::handle_speech(const std::string & body_text) {
+@@ -804,7 +804,8 @@ engine::runtime::TaskRequest ServerState::build_speech_request(const LoadedModel
+     return minitts::server::build_speech_request(
+         body,
+         SpeechRequestContext{
+-            request_base_, config_.voice_dir, model.voice_presets, model.default_voice_preset,
++            model.config.family, request_base_, config_.voice_dir,
++            model.voice_presets, model.default_voice_preset,
+             model.accepts_reference_text, model.accepts_speed,
+             model.accepts_speaking_rate,
+             model.config.default_request_options});
+@@ -921,13 +922,29 @@ HttpResponse ServerState::handle_speech(const std::string & body_text) {
      auto & model = require_model(body);
      const auto request = build_speech_request(model, body);
      if (body.find("stream_format") != nullptr || bool_field(body, "stream", false)) {
 +        const float speed = speech_speed(body);
-+        if (speed != 1.0F && !model.accepts_speed &&
-+            !model.accepts_speaking_rate) {
++        if (speed != 1.0F &&
++            speech_speed_postprocess(model.config.family, model.accepts_speed,
++                                     model.accepts_speaking_rate)) {
 +            throw engine::runtime::InvalidRequestError(
 +                "speed postprocessing is not available for streaming speech");
 +        }
@@ -56,7 +81,10 @@ index e170573..3330e2a 100644
 +    const auto model_audio = select_audio_output(timed_result.result);
 +    const float speed = speech_speed(body);
 +    const auto processed_audio =
-+        speed != 1.0F && !model.accepts_speed && !model.accepts_speaking_rate
++        speed != 1.0F &&
++                speech_speed_postprocess(model.config.family,
++                                         model.accepts_speed,
++                                         model.accepts_speaking_rate)
 +            ? apply_speech_speed(model_audio, speed)
 +            : model_audio;
 +    const auto & audio = processed_audio;
@@ -64,7 +92,7 @@ index e170573..3330e2a 100644
      const auto response_format = engine::io::json::optional_string(body, "response_format", "wav");
      if (response_format == "json" || response_format == "b64_json") {
 diff --git a/app/server/server_protocol.cpp b/app/server/server_protocol.cpp
-index e656817..38bcde7 100644
+index e656817..6f366b9 100644
 --- a/app/server/server_protocol.cpp
 +++ b/app/server/server_protocol.cpp
 @@ -1,8 +1,8 @@
@@ -77,7 +105,7 @@ index e656817..38bcde7 100644
  
  #include "engine/framework/debug/trace.h"
  #include "engine/framework/model_spec/metadata.h"
-@@ -232,11 +232,7 @@ build_speech_request(const Value &body, const SpeechRequestContext &context) {
+@@ -232,11 +232,8 @@ build_speech_request(const Value &body, const SpeechRequestContext &context) {
      if (!std::isfinite(rate) || rate <= 0.0F) {
        throw std::runtime_error("speed must be a positive finite number");
      }
@@ -86,11 +114,12 @@ index e656817..38bcde7 100644
 -      if (!context.accepts_speed && !context.accepts_speaking_rate) {
 -        throw std::runtime_error("speed is not supported by this model");
 -      }
-+    if (context.accepts_speed || context.accepts_speaking_rate) {
++    if (!speech_speed_postprocess(context.family, context.accepts_speed,
++                                  context.accepts_speaking_rate)) {
        if (context.accepts_speed) {
          request.options["speed"] = std::to_string(rate);
        } else {
-@@ -264,6 +260,66 @@ build_speech_request(const Value &body, const SpeechRequestContext &context) {
+@@ -264,6 +261,72 @@ build_speech_request(const Value &body, const SpeechRequestContext &context) {
    return merged;
  }
  
@@ -108,6 +137,12 @@ index e656817..38bcde7 100644
 +        "speed must be a finite number between 0.5 and 2.0");
 +  }
 +  return static_cast<float>(parsed);
++}
++
++bool speech_speed_postprocess(std::string_view family, bool accepts_speed,
++                              bool accepts_speaking_rate) {
++  return family == "voxcpm2" || family == "voxcpm1" ||
++         (!accepts_speed && !accepts_speaking_rate);
 +}
 +
 +engine::runtime::AudioBuffer
@@ -158,17 +193,26 @@ index e656817..38bcde7 100644
    return message.find("model contract spec not found for family '") !=
               std::string_view::npos ||
 diff --git a/app/server/server_protocol.h b/app/server/server_protocol.h
-index 1393761..69bc089 100644
+index 1393761..f5f70d7 100644
 --- a/app/server/server_protocol.h
 +++ b/app/server/server_protocol.h
-@@ -64,6 +64,9 @@ struct SpeechRequestContext {
+@@ -51,6 +51,7 @@ struct RuntimeVoicePreset {
+ };
+ 
+ struct SpeechRequestContext {
++  std::string_view family;
+   const std::filesystem::path &request_base;
+   const std::optional<std::filesystem::path> &voice_dir;
+   const std::unordered_map<std::string, RuntimeVoicePreset> &voice_presets;
+@@ -64,6 +65,11 @@ struct SpeechRequestContext {
  engine::runtime::TaskRequest build_speech_request(
      const engine::io::json::Value &body,
      const SpeechRequestContext &context);
 +float speech_speed(const engine::io::json::Value &body);
++bool speech_speed_postprocess(
++    std::string_view family, bool accepts_speed, bool accepts_speaking_rate);
 +engine::runtime::AudioBuffer
 +apply_speech_speed(const engine::runtime::AudioBuffer &audio, float speed);
  engine::runtime::TaskRequest apply_default_request_options(
      const std::unordered_map<std::string, std::string> &default_options,
      engine::runtime::TaskRequest request);
-
