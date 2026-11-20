@@ -9,6 +9,7 @@ never an error, but it silently drops the patches.
 
 ```powershell
 gh workflow run release-sd-cpp.yml -R galazzo/kata-engines -f revision=1
+gh workflow run release-audio-cpp.yml -R galazzo/kata-engines -f revision=1
 gh run watch -R galazzo/kata-engines
 gh release list -R galazzo/kata-engines
 ```
@@ -19,8 +20,8 @@ cannot be changed without republishing, so test locally first (below).
 
 ## Dojo moves to a new upstream tag
 
-1. Edit `tag=` in `sd.cpp/UPSTREAM`.
-2. `./scripts/build.ps1 -Engine sd.cpp -Variant cuda12 -CudaArchitectures 86` from a Visual Studio developer
+1. Edit `tag=` in the engine's `UPSTREAM`.
+2. Run `./scripts/build.ps1 -Engine <engine> -Variant cuda12 -CudaArchitectures 86` from a Visual Studio developer
    shell. A patch that no longer applies stops the build and names the patch.
    - Upstream fixed it: delete the patch and, if nothing else needs it, the key in `capabilities.json`.
      Also update `lora_warnings` in Dojo's Wan pack so it stops expecting `dojo-capabilities.json` from that

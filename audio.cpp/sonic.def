@@ -1,0 +1,9 @@
+LIBRARY sonic
+EXPORTS
+  sonicCreateStream
+  sonicDestroyStream
+  sonicSetSpeed
+  sonicWriteFloatToStream
+  sonicReadFloatFromStream
+  sonicFlushStream
+  sonicSamplesAvailable

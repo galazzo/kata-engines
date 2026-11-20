@@ -1,0 +1,4 @@
+{
+  "tts_offline_speed_postprocess": true,
+  "tts_speed_range": [0.5, 2.0]
+}

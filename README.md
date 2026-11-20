@@ -1,10 +1,12 @@
 # kata-engines
 
-Patched builds of the native engines Dojo runs (sd.cpp, llama.cpp). Dojo installs a build from here when
-this repo has one for the pinned upstream tag and the machine's platform and variant, and falls back to
-the upstream release otherwise. So only what has a patch needs to be built and published.
+Patched builds of the native engines Dojo runs (audio.cpp, sd.cpp, llama.cpp).
+Dojo installs a build from here when this repo has one for the pinned upstream
+tag and the machine's platform and variant, and falls back to the upstream
+release otherwise. So only what has a patch needs to be built and published.
 
 ```text
+audio.cpp/           audio inference runtime with TTS speed patch
 sd.cpp/
   UPSTREAM            upstream repo and the tag the patches are written against
   capabilities.json   what the build can do, shipped inside the zip as dojo-capabilities.json
@@ -20,6 +22,7 @@ How to publish a release, move to a new upstream tag and add a patch: see [MAINT
 
 | Engine | Patch | What it fixes | Upstream |
 | --- | --- | --- | --- |
+| audio.cpp | `0001-openai-offline-speech-speed` | Adds pitch-preserving `speed` 0.5-2.0 to offline `/v1/audio/speech` for models without a native speed option | to open after CI validation |
 | sd.cpp | `0001-fix-lora-apply-high-noise-loras-at-runtime` | A `<lora:\|high_noise\|NAME>` LoRA is silently ignored on quantized (GGUF) Wan2.2 models: the clip is identical with and without it | to open, see `sd.cpp/UPSTREAM-ISSUE.md` |
 
 ## Build locally
@@ -32,6 +35,7 @@ the 12.8 DLLs: it needs an NVIDIA driver 570 or newer. With an older toolkit `bu
 the toolkit does not know (12.6 stops at 90), so only build the release with 12.8.
 
 ```powershell
+./scripts/build.ps1 -Engine audio.cpp -Variant cuda12 -CudaArchitectures 86
 ./scripts/build.ps1 -Engine sd.cpp -Variant cuda12 -CudaArchitectures 86   # fast, your GPU only
 ```
 

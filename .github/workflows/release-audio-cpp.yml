@@ -1,0 +1,44 @@
+name: release-audio-cpp
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "kata revision number (the N of -kataN)"
+        required: true
+        default: "1"
+
+jobs:
+  windows-cuda12:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.35
+        with:
+          cuda: "12.8.1"
+          method: "network"
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+      - name: Build patched audio.cpp and Sonic
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          ./scripts/build.ps1 -Engine audio.cpp -Variant cuda12 -Revision ${{ inputs.revision }}
+      - name: Pack the CUDA runtime
+        shell: pwsh
+        run: |
+          $tag = ((Get-Content audio.cpp/UPSTREAM) -match '^tag=')[0].Substring(4)
+          $dst = "cudart"
+          robocopy "${{ env.CUDA_PATH }}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll
+          Compress-Archive -Path "$dst\*" -DestinationPath "dist/audio-$tag-cudart-windows-x64-cuda12.8.zip"
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = ((Get-Content audio.cpp/UPSTREAM) -match '^tag=')[0].Substring(4) + "-kata${{ inputs.revision }}"
+          gh release create $tag dist/*.zip --title $tag --notes "audio.cpp $tag with the patch in audio.cpp/patches and the pinned Sonic DLL"
