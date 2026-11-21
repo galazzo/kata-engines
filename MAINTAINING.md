@@ -22,6 +22,10 @@ objects when the source/build path is too long. Before publishing, run the
 produced `audiocpp_server.exe --version` and one actual generation request that
 uses the patched capability.
 
+The llama.cpp release `<tag>-kata<N>` holds only the AMD ROCm build, made with `scripts/build-llama-hip.ps1`
+(not covered by the workflows). Before publishing, run `llama-bench` or `llama-server` from the unzipped asset with
+a PATH that has no HIP SDK, to check that it finds the GPU (`--list-devices` lists `ROCm0`).
+
 The workflows below are the reproducibility fallback. Do not rely on a green
 workflow as a substitute for the local runtime test.
 
