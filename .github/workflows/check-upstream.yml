@@ -31,3 +31,35 @@ jobs:
             fi
           done
           exit $fail
+
+  releases-complete:
+    # Does the release of each pinned tag carry every build Dojo needs? A missing one means Dojo silently
+    # installs the upstream build instead (no patch, and for gfx1151 no ROCm build), so it must not go unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check the assets of the release of each pinned tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fail=0
+          check() {
+            engine="$1"; shift
+            tag=$(grep '^tag=' "$engine/UPSTREAM" | cut -d= -f2)
+            release=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -E "^${tag}-kata[0-9]+$" | sort -V | tail -1 || true)
+            if [ -z "$release" ]; then
+              echo "- $engine $tag: NO release $tag-kataN" >> "$GITHUB_STEP_SUMMARY"; fail=1; return
+            fi
+            assets=$(gh release view "$release" --json assets --jq '.assets[].name')
+            for pattern in "$@"; do
+              if echo "$assets" | grep -Eq "$pattern"; then
+                echo "- $engine $release: has $pattern" >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "- $engine $release: MISSING $pattern" >> "$GITHUB_STEP_SUMMARY"; fail=1
+              fi
+            done
+          }
+          check sd.cpp 'bin-win-cuda12-x64\.zip$' 'bin-win-vulkan-x64\.zip$'
+          check audio.cpp 'windows-x64-cuda12\.8\.zip$' 'windows-x64-vulkan\.zip$'
+          check llama.cpp 'bin-win-rocm-gfx1151-x64\.zip$'
+          exit $fail

@@ -48,7 +48,7 @@ $rocmEnv = Join-Path $WorkDir "rocm-$RocmVersion"
 $python = Join-Path $rocmEnv 'Scripts\python.exe'
 if (-not (Test-Path $python)) {
     uv venv $rocmEnv
-    uv pip install --python $python --index-url $RocmIndex "rocm[libraries,devel]==$RocmVersion"
+    uv pip install --python $python --index-url $RocmIndex "rocm[libraries,devel]==$RocmVersion" "rocm-sdk-device-$GpuTarget==$RocmVersion"
     if ($LASTEXITCODE) { throw 'ROCm wheels install failed' }
 }
 & $python -m rocm_sdk init
@@ -83,13 +83,38 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item (Join-Path $build 'bin\*') $stage -Recurse
 foreach ($dll in 'amd_comgr*.dll', 'amdhip64*.dll', 'rocm_kpack.dll', 'hiprtc*.dll') { Copy-Item (Join-Path $core "bin\$dll") $stage }
 foreach ($dll in 'hipblas.dll', 'rocblas.dll', 'rocsolver.dll', 'libhipblaslt.dll') { Copy-Item (Join-Path $libs "bin\$dll") $stage }
-# Kernel libraries stored next to the DLLs (older ROCm releases): only the target architecture is kept.
+# Whatever else these DLLs need from the wheels (it changes between ROCm releases, e.g. origami.dll in 10.0).
+$pool = @{}
+foreach ($dir in (Join-Path $core 'bin'), (Join-Path $libs 'bin')) {
+    Get-ChildItem $dir -Filter *.dll -File | ForEach-Object { $pool[$_.Name.ToLower()] = $_.FullName }
+}
+$pending = [System.Collections.Generic.Queue[string]]::new()
+Get-ChildItem $stage -Filter *.dll | ForEach-Object { $pending.Enqueue($_.FullName) }
+while ($pending.Count) {
+    $dll = $pending.Dequeue()
+    foreach ($line in (dumpbin /dependents $dll)) {
+        if ($line -notmatch '^\s+(\S+\.dll)\s*$') { continue }
+        $name = $Matches[1].ToLower()
+        if ($pool.ContainsKey($name) -and -not (Test-Path (Join-Path $stage $name))) {
+            Copy-Item $pool[$name] $stage
+            $pending.Enqueue((Join-Path $stage $name))
+            Write-Host "runtime dependency: $name"
+        }
+    }
+}
+# Device code of the target architecture (the `rocm-sdk-device-<gpu target>` wheel): the .kpack archives and the
+# kernel libraries of rocBLAS and hipBLASLt. Only that architecture is kept.
+$kpack = Join-Path $libs '.kpack'
+if (Test-Path $kpack) {
+    New-Item -ItemType Directory -Force (Join-Path $stage '.kpack') | Out-Null
+    Copy-Item (Join-Path $kpack "*_$GpuTarget.kpack") (Join-Path $stage '.kpack')
+}
 foreach ($dir in 'rocblas', 'hipblaslt') {
     $data = Join-Path $libs "bin\$dir"
     if (Test-Path $data) {
         Copy-Item $data (Join-Path $stage $dir) -Recurse
         Get-ChildItem (Join-Path $stage $dir) -Recurse -File |
-            Where-Object { $_.Name -match 'gfx\d+' -and $_.Name -notmatch $GpuTarget } | Remove-Item
+            Where-Object { $_.FullName -match 'gfx\d+' -and $_.FullName -notmatch $GpuTarget } | Remove-Item
     }
 }
 # Visual C++ runtime next to the binaries: a machine without the redistributable still starts the engine.

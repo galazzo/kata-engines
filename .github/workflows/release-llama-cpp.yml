@@ -56,7 +56,7 @@ jobs:
         run: |
           $zip = (Get-ChildItem dist/llama-*-rocm-gfx1151-x64.zip).FullName
           Expand-Archive $zip check
-          foreach ($file in 'llama-server.exe', 'llama-bench.exe', 'ggml-hip.dll', 'amdhip64_7.dll', 'hipblas.dll', 'rocblas.dll', 'rocsolver.dll') {
+          foreach ($file in 'llama-server.exe', 'llama-bench.exe', 'ggml-hip.dll', 'amdhip64_7.dll', 'hipblas.dll', 'rocblas.dll', 'rocsolver.dll', '.kpack/blas_lib_gfx1151.kpack', 'rocblas/library/gfx1151') {
             if (-not (Test-Path "check/$file")) { throw "missing $file in $zip" }
           }
       - uses: actions/upload-artifact@v4
