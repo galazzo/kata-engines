@@ -1,0 +1,75 @@
+name: release-llama-cpp
+
+# Builds llama.cpp for AMD Strix Halo (gfx1151) with ROCm and publishes it as a release tagged
+# `<upstream tag>-kata<N>`. Upstream has no such build (its ROCm zip needs an installed HIP SDK and targets many
+# architectures at once), so Dojo's `rocm-gfx1151` variant comes only from here. Other variants are served by upstream.
+# Running it again for the same revision replaces the asset.
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "kata revision number (the N of -kataN)"
+        required: true
+        default: "1"
+      publish:
+        description: "upload the asset to the release (off: only keep it as a workflow artifact, to test a build)"
+        type: boolean
+        default: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create the release when it does not exist yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(grep '^tag=' llama.cpp/UPSTREAM | cut -d= -f2)-kata${{ inputs.revision }}"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" \
+            --notes "llama.cpp $tag built for AMD gfx1151 (Strix Halo) with ROCm, runtime included (no HIP SDK needed)."
+
+  windows-rocm-gfx1151:
+    needs: release
+    runs-on: windows-2022
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Ninja and uv
+        shell: pwsh
+        run: |
+          choco install ninja -y
+          python -m pip install uv
+      - name: Build
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          ./scripts/build-llama-hip.ps1 -GpuTarget gfx1151 -Revision ${{ inputs.revision }}
+      - name: Check the package (the runner has no AMD GPU, so only its content)
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem dist/llama-*-rocm-gfx1151-x64.zip).FullName
+          Expand-Archive $zip check
+          foreach ($file in 'llama-server.exe', 'llama-bench.exe', 'ggml-hip.dll', 'amdhip64_7.dll', 'hipblas.dll', 'rocblas.dll', 'rocsolver.dll') {
+            if (-not (Test-Path "check/$file")) { throw "missing $file in $zip" }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-rocm-gfx1151
+          path: dist/*.zip
+          retention-days: 7
+          compression-level: 0
+      - name: Publish
+        if: ${{ inputs.publish }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = ((Get-Content llama.cpp/UPSTREAM) -match '^tag=')[0].Substring(4) + "-kata${{ inputs.revision }}"
+          gh release upload $tag (Get-ChildItem dist/*.zip).FullName --clobber

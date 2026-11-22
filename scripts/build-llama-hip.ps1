@@ -7,24 +7,22 @@
   ./scripts/build-llama-hip.ps1 -GpuTarget gfx1151 -Revision 1
 
 Output: dist/llama-<tag>-bin-win-rocm-<gpu target>-x64.zip, the asset Dojo's `rocm-<gpu target>` variant matches.
-Needs: Visual Studio build tools, Ninja, uv, and the AMD HIP SDK for Windows (HIP_PATH) as the compiler.
-The runtime inside the zip comes from the AMD ROCm wheels of the same architecture (`rocm-sdk-core` and
-`rocm-sdk-libraries-<gpu target>`), not from the SDK, so the redistributed files are the open source ones.
+Run it from a Visual Studio developer shell (cl.exe for the Windows headers, Ninja, uv on PATH).
+The compiler, the HIP headers and the runtime shipped in the zip all come from the AMD ROCm wheels
+(`rocm[libraries,devel]`, the same recipe as upstream llama.cpp's Windows ROCm release), installed in a throwaway
+environment: no HIP SDK installer is needed, locally or in CI.
 #>
 param(
     [string]$GpuTarget = 'gfx1151',
-    [string]$HipSdk = $env:HIP_PATH,
-    # The ROCm wheels the runtime is taken from (Dojo's gfx1151 packs run on the same ones).
-    [string]$RocmVersion = '7.14.0a20260612',
+    [string]$RocmVersion = '10.0.0',
+    [string]$RocmIndex = 'https://stable.repo.amd.com/rocm/whl-next/',
     [int]$Revision = 1,
     [string]$WorkDir = (Join-Path $PSScriptRoot '..\_work'),
     [string]$DistDir = (Join-Path $PSScriptRoot '..\dist')
 )
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
-if (-not $HipSdk -or -not (Test-Path (Join-Path $HipSdk 'bin\clang++.exe'))) {
-    throw 'HIP SDK not found: install it or pass -HipSdk (the folder that holds bin\clang++.exe)'
-}
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'run this from a Visual Studio developer shell' }
 
 $upstream = @{}
 Get-Content (Join-Path $root 'llama.cpp\UPSTREAM') | ForEach-Object {
@@ -45,43 +43,55 @@ foreach ($patch in Get-ChildItem (Join-Path $root 'llama.cpp\patches\*.patch') -
     Write-Host "applied $($patch.Name)"
 }
 
-# The HIP SDK only provides the compiler; the VS environment provides the Windows headers and libraries.
-if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) { throw 'run this from a Visual Studio developer shell' }
-$env:HIP_PATH = $HipSdk
+# ROCm wheels: compiler and headers (devel), runtime (core and libraries).
+$rocmEnv = Join-Path $WorkDir "rocm-$RocmVersion"
+$python = Join-Path $rocmEnv 'Scripts\python.exe'
+if (-not (Test-Path $python)) {
+    uv venv $rocmEnv
+    uv pip install --python $python --index-url $RocmIndex "rocm[libraries,devel]==$RocmVersion"
+    if ($LASTEXITCODE) { throw 'ROCm wheels install failed' }
+}
+& $python -m rocm_sdk init
+if ($LASTEXITCODE) { throw 'rocm-sdk init failed' }
+$rocm = (& $python -m rocm_sdk path --root).Trim()
+$rocmBin = (& $python -m rocm_sdk path --bin).Trim()
+$llvm = Join-Path $rocm 'lib\llvm'
+$env:HIP_PATH = $rocm
 $env:HIP_PLATFORM = 'amd'
-$env:PATH = "$(Join-Path $HipSdk 'bin');$env:PATH"
+$env:HIP_DEVICE_LIB_PATH = Join-Path $llvm 'amdgcn\bitcode'
+$env:LLVM_PATH = $llvm
+$env:PATH = "$rocmBin;$env:PATH"
 
 $build = Join-Path $src 'build-hip'
 cmake -S $src -B $build -G Ninja `
-    "-DCMAKE_C_COMPILER=$(Join-Path $HipSdk 'bin\clang.exe')" "-DCMAKE_CXX_COMPILER=$(Join-Path $HipSdk 'bin\clang++.exe')" `
-    -DCMAKE_BUILD_TYPE=Release "-DGPU_TARGETS=$GpuTarget" -DBUILD_SHARED_LIBS=ON -DLLAMA_BUILD_TESTS=OFF `
-    -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=OFF -DGGML_CUDA_FORCE_CUBLAS=OFF -DGGML_RPC=ON -DGGML_OPENMP=OFF `
-    -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON
+    "-DCMAKE_PREFIX_PATH=$rocm" "-DHIP_PATH=$rocm" `
+    "-DCMAKE_C_COMPILER=$(Join-Path $llvm 'bin\clang.exe')" "-DCMAKE_CXX_COMPILER=$(Join-Path $llvm 'bin\clang++.exe')" `
+    "-DCMAKE_HIP_COMPILER=$(Join-Path $llvm 'bin\clang.exe')" '-DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types' `
+    -DCMAKE_BUILD_TYPE=Release "-DGPU_TARGETS=$GpuTarget" "-DAMDGPU_TARGETS=$GpuTarget" -DBUILD_SHARED_LIBS=ON `
+    -DLLAMA_BUILD_TESTS=OFF -DGGML_HIP=ON -DGGML_HIP_ROCWMMA_FATTN=OFF -DGGML_CUDA_FORCE_CUBLAS=OFF -DGGML_RPC=ON `
+    -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON
 if ($LASTEXITCODE) { throw 'configure failed' }
 cmake --build $build --target llama-server llama-bench llama-cli
 if ($LASTEXITCODE) { throw 'build failed' }
 
-# Runtime: the ROCm wheels of this architecture, installed in a throwaway environment.
-$rocmEnv = Join-Path $WorkDir "rocm-$GpuTarget-$RocmVersion"
-if (-not (Test-Path $rocmEnv)) {
-    uv venv $rocmEnv
-    uv pip install --python (Join-Path $rocmEnv 'Scripts\python.exe') --index-url "https://rocm.nightlies.amd.com/v2/$GpuTarget/" `
-        "rocm-sdk-core==$RocmVersion" "rocm-sdk-libraries-$GpuTarget==$RocmVersion"
-    if ($LASTEXITCODE) { throw 'ROCm wheels install failed' }
-}
 $sp = Join-Path $rocmEnv 'Lib\site-packages'
 $core = Join-Path $sp '_rocm_sdk_core'
-$libs = Join-Path $sp "_rocm_sdk_libraries_$GpuTarget"
-
+$libs = Join-Path $sp '_rocm_sdk_libraries'
 $stage = Join-Path $WorkDir "stage-llama-$GpuTarget"
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $stage | Out-Null
 Copy-Item (Join-Path $build 'bin\*') $stage -Recurse
-foreach ($dll in 'amd_comgr.dll', 'amdhip64_7.dll', 'rocm_kpack.dll', 'hiprtc*.dll') {
-    Copy-Item (Join-Path $core "bin\$dll") $stage
-}
+foreach ($dll in 'amd_comgr*.dll', 'amdhip64*.dll', 'rocm_kpack.dll', 'hiprtc*.dll') { Copy-Item (Join-Path $core "bin\$dll") $stage }
 foreach ($dll in 'hipblas.dll', 'rocblas.dll', 'rocsolver.dll', 'libhipblaslt.dll') { Copy-Item (Join-Path $libs "bin\$dll") $stage }
-foreach ($dir in 'rocblas', 'hipblaslt') { Copy-Item (Join-Path $libs "bin\$dir") (Join-Path $stage $dir) -Recurse }
+# Kernel libraries stored next to the DLLs (older ROCm releases): only the target architecture is kept.
+foreach ($dir in 'rocblas', 'hipblaslt') {
+    $data = Join-Path $libs "bin\$dir"
+    if (Test-Path $data) {
+        Copy-Item $data (Join-Path $stage $dir) -Recurse
+        Get-ChildItem (Join-Path $stage $dir) -Recurse -File |
+            Where-Object { $_.Name -match 'gfx\d+' -and $_.Name -notmatch $GpuTarget } | Remove-Item
+    }
+}
 # Visual C++ runtime next to the binaries: a machine without the redistributable still starts the engine.
 $crt = Get-ChildItem (Join-Path $env:VCToolsRedistDir 'x64\Microsoft.VC*.CRT') -Directory | Select-Object -First 1
 Copy-Item (Join-Path $crt.FullName '*.dll') $stage
