@@ -7,7 +7,28 @@ never an error, but it silently drops the patches.
 
 ## Publish a release
 
-Preferred for a verified local build:
+The workflows build and publish every variant, so a release is complete without any manual upload:
+
+```powershell
+gh workflow run release-sd-cpp.yml -R galazzo/kata-engines -f revision=1            # cuda12 and vulkan
+gh workflow run release-audio-cpp.yml -R galazzo/kata-engines -f revision=1         # cuda12 and vulkan
+gh workflow run release-llama-cpp.yml -R galazzo/kata-engines -f revision=1         # ROCm gfx1151
+gh run watch -R galazzo/kata-engines
+gh release list -R galazzo/kata-engines
+```
+
+Each workflow creates the release when it does not exist and otherwise adds to it, replacing an asset of the same
+name, so a failed variant can be run again alone (`-f variants=vulkan`, or `cuda12`). To test a llama.cpp build
+without touching the release, run it with `-f publish=false` and download the workflow artifact. The weekly
+`check-upstream` workflow also fails when the release of a pinned tag lacks one of the builds Dojo needs
+(job `releases-complete`).
+
+A green workflow does not prove the engine runs: before relying on a release, download the asset and run it on a
+machine with the GPU. For audio.cpp run `audiocpp_server.exe --version` and one generation request that uses the
+patched capability. For the llama.cpp ROCm build run `llama-server --list-devices` with a PATH that has no HIP SDK
+(it must list `ROCm0`) and a short `llama-bench`.
+
+A local build is the fallback, for a quick check or when Actions is not available:
 
 ```powershell
 ./scripts/build.ps1 -Engine audio.cpp -Variant cuda12 `
@@ -18,27 +39,11 @@ gh release create v0.9.5-kata1 C:\keng-dist\audio-v0.9.5-*.zip `
 ```
 
 Use short Windows paths for audio.cpp because SentencePiece fails while writing
-objects when the source/build path is too long. Before publishing, run the
-produced `audiocpp_server.exe --version` and one actual generation request that
-uses the patched capability.
-
-The llama.cpp release `<tag>-kata<N>` holds only the AMD ROCm build, made with `scripts/build-llama-hip.ps1`
-(not covered by the workflows). Before publishing, run `llama-bench` or `llama-server` from the unzipped asset with
-a PATH that has no HIP SDK, to check that it finds the GPU (`--list-devices` lists `ROCm0`).
-
-The workflows below are the reproducibility fallback. Do not rely on a green
-workflow as a substitute for the local runtime test.
-
-```powershell
-gh workflow run release-sd-cpp.yml -R galazzo/kata-engines -f revision=1
-gh workflow run release-audio-cpp.yml -R galazzo/kata-engines -f revision=1
-gh run watch -R galazzo/kata-engines
-gh release list -R galazzo/kata-engines
-```
+objects when the source/build path is too long.
 
 `revision` is the `N` of `-kataN`. Use `1` for a new upstream tag and increase it when you rebuild the same
-tag (changed patch, build fix). Dojo takes the highest `N` of the pinned tag. A release is public and
-cannot be changed without republishing, so test locally first (below).
+tag (changed patch, build fix). Dojo takes the highest `N` of the pinned tag. A release is public, so test the
+build (above) before publishing a new revision.
 
 ## Dojo moves to a new upstream tag
 

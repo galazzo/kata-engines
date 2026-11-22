@@ -51,15 +51,20 @@ Visual Studio developer shell with the Vulkan SDK installed.
 ### llama.cpp for AMD (ROCm)
 
 Upstream publishes a ROCm zip without the ROCm runtime, which needs an installed HIP SDK and is slower than a
-build made for one architecture. `build-llama-hip.ps1` builds the pinned tag for a single architecture with the
-HIP SDK compiler and packs it with the runtime from the AMD ROCm wheels, so the user installs nothing:
+build made for one architecture. `build-llama-hip.ps1` builds the pinned tag for a single architecture and packs
+it with the ROCm runtime, so the user installs nothing. The compiler, the HIP headers and the runtime all come
+from the AMD ROCm wheels (`rocm[libraries,devel]` plus `rocm-sdk-device-<gpu target>`, the recipe of upstream's own
+Windows ROCm release), so no HIP SDK installer is needed:
 
 ```powershell
 ./scripts/build-llama-hip.ps1 -GpuTarget gfx1151   # AMD Strix Halo (Ryzen AI MAX)
 ```
 
+It needs the Visual Studio 2022 build tools: the ROCm 10 clang does not compile against the Visual Studio 2026
+headers, so on a machine that only has 2026 use the `release-llama-cpp` workflow, which runs on `windows-2022`.
+
 The asset is `llama-<tag>-bin-win-rocm-gfx1151-x64.zip`, matched by Dojo's `rocm-gfx1151` variant. On an
-AMD Ryzen AI MAX+ 395 with Qwen3.8-27B Q4_K_XL it processes the prompt at about 340 tokens/s, against 262 for the
+AMD Ryzen AI MAX+ 395 with Qwen3.8-27B Q4_K_XL it processes the prompt at about 330 tokens/s, against 262 for the
 upstream ROCm zip and 218 for the upstream Vulkan one (generation is memory bound, about 11 tokens/s on all).
 
 ## Move to a new upstream version
