@@ -58,6 +58,9 @@ jobs:
           $tag = ((Get-Content audio.cpp/UPSTREAM) -match '^tag=')[0].Substring(4)
           $dst = "cudart"
           robocopy "${{ env.CUDA_PATH }}\bin" $dst cudart64_*.dll cublas64_*.dll cublasLt64_*.dll cufft64_*.dll
+          # robocopy exits 1 when it copied files: only 8 and above is a failure.
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
+          $global:LASTEXITCODE = 0
           Compress-Archive -Path "$dst\*" -DestinationPath "dist/audio-$tag-cudart-windows-x64-cuda12.8.zip"
       - name: Publish
         shell: pwsh
