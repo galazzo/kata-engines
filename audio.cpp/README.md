@@ -4,6 +4,13 @@ Upstream repository and tag are declared in `UPSTREAM`. The release contains
 the `audiocpp_server` deployment build plus a pinned Apache-2.0 Sonic DLL for
 pitch-preserving TTS speed adjustment.
 
+## Model families
+
+The build links only the families Dojo serves (`-DAUDIOCPP_MODELS` in `scripts/build.ps1`), which keeps the
+binary small: `voxcpm2` (TTS), `qwen3_asr` (transcription) and `minimax_music3` (text to music, served by
+Dojo as `/v1/music`). A family that is not linked answers `unsupported model family hint: <family>`, so a
+new Dojo catalog entry on audio.cpp needs its family added to that list and a new revision (`-kata<N>`).
+
 ## Patches
 
 ### 0001-openai-offline-speech-speed

@@ -70,7 +70,7 @@ $defines = if ($Engine -eq 'sd.cpp') {
         'vulkan' { @('-DENGINE_ENABLE_CUDA=OFF', '-DENGINE_ENABLE_VULKAN=ON') }
     }
     @('-DAUDIOCPP_DEPLOYMENT_BUILD=ON', '-DAUDIOCPP_BUILD_NATIVE_MODEL_MANAGER=OFF',
-      '-DAUDIOCPP_MODEL_SET=custom', '-DAUDIOCPP_MODELS=voxcpm2,qwen3_asr',
+      '-DAUDIOCPP_MODEL_SET=custom', '-DAUDIOCPP_MODELS=voxcpm2,qwen3_asr,minimax_music3',
       "-DAUDIOCPP_VERSION=$($upstream.tag)-kata$Revision")
 }
 
